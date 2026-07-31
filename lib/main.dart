@@ -18,7 +18,7 @@ class ControleHorasApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Controle de Horas',
+      title: 'Bate Pronto',
       debugShowCheckedModeBanner: false,
       theme: buildTheme(),
       // Android 15+ força edge-to-edge: o app desenha atrás da barra de

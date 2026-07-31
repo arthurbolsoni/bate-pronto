@@ -571,6 +571,9 @@ class _HoursScreenState extends State<HoursScreen> {
               if (d.missingTime > 0)
                 Text('−${hhmm(d.missingTime.round())}',
                     style: const TextStyle(color: C.neg, fontSize: 12)),
+              if (_salary.isSet && !d.isOff && d.workedSeconds > 0)
+                Text(brl(_salary.hourRate * d.workedSeconds / 3600),
+                    style: const TextStyle(color: C.acc, fontSize: 12)),
             ],
           ),
         ],
