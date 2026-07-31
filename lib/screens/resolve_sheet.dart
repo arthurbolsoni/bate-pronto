@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../api.dart';
 import '../models.dart';
+import '../msg_history.dart';
 import '../theme.dart';
 
 const _diasSemana = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
@@ -30,12 +31,16 @@ class _ResolveSheetState extends State<ResolveSheet> {
   int? _motiveId;
   bool _sending = false;
   String? _error;
+  List<String> _msgHistory = [];
 
   @override
   void initState() {
     super.initState();
     _justif = TextEditingController();
     _initDay();
+    MsgHistory.load().then((h) {
+      if (mounted) setState(() => _msgHistory = h);
+    });
   }
 
   @override
@@ -184,6 +189,7 @@ class _ResolveSheetState extends State<ResolveSheet> {
         times: times,
       );
       _anyChanged = true;
+      _msgHistory = await MsgHistory.add(justif);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
         backgroundColor: C.pos,
@@ -383,6 +389,42 @@ class _ResolveSheetState extends State<ResolveSheet> {
               labelText: 'Justificativa',
               hintText: 'ex.: esqueci de bater a saída'),
         ),
+        if (_msgHistory.isNotEmpty) ...[
+          const SizedBox(height: 10),
+          const Text('Mensagens recentes (toque p/ usar · segure p/ remover):',
+              style: TextStyle(color: C.mut, fontSize: 12)),
+          const SizedBox(height: 6),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final m in _msgHistory)
+                InkWell(
+                  borderRadius: BorderRadius.circular(999),
+                  onTap: () => setState(() {
+                    _justif.text = m;
+                    _justif.selection = TextSelection.collapsed(
+                        offset: m.length);
+                  }),
+                  onLongPress: () async {
+                    final h = await MsgHistory.remove(m);
+                    if (mounted) setState(() => _msgHistory = h);
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 7),
+                    decoration: BoxDecoration(
+                      color: C.bg,
+                      border: Border.all(color: C.line),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Text(m,
+                        style: const TextStyle(color: C.fg, fontSize: 13)),
+                  ),
+                ),
+            ],
+          ),
+        ],
         if (_error != null) ...[
           const SizedBox(height: 12),
           Text(_error!, style: const TextStyle(color: C.neg)),

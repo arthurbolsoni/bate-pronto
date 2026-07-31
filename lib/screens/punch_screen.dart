@@ -186,7 +186,7 @@ class _PunchScreenState extends State<PunchScreen>
     final now = DateTime.now();
     return Scaffold(
       appBar: AppBar(
-        title: const Text('⏱️  Controle de Horas'),
+        title: const Text('⏱️  Bate Pronto'),
         automaticallyImplyLeading: false,
         actions: [
           IconButton(
