@@ -5,6 +5,10 @@ on:
     branches: [main, master]
   pull_request:
     branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -14,11 +18,22 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Flutter (stable)
+      # AGP 9 / Kotlin 2.3.20 target JVM 17.
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      # Pinned: android/ is configured for AGP 9.0.1 + Gradle 9.1.0, which is
+      # what Flutter 3.44's plugins and Gradle plugin expect. A different
+      # Flutter minor will not configure.
+      - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: stable
+          flutter-version: 3.44.8
           channel: stable
+          cache: true
 
       - name: Get dependencies
         run: flutter pub get
@@ -32,8 +47,28 @@ jobs:
       - name: Build APK (release)
         run: flutter build apk --release
 
+      - name: Name the APK
+        id: apk
+        run: |
+          version=$(awk '/^version:/{print $2}' pubspec.yaml | tr '+' '-')
+          name="bate-pronto-${version}-build.${{ github.run_number }}"
+          mv build/app/outputs/flutter-apk/app-release.apk "build/app/outputs/flutter-apk/${name}.apk"
+          echo "path=build/app/outputs/flutter-apk/${name}.apk" >> "$GITHUB_OUTPUT"
+          echo "tag=v${version}-build.${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: apk
-          path: build/app/outputs/flutter-apk/*.apk
+          path: ${{ steps.apk.outputs.path }}
+
+      # Releases are cut from main only, so PR runs still build and test.
+      - name: Publish GitHub Release
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ steps.apk.outputs.tag }}" \
+            "${{ steps.apk.outputs.path }}" \
+            --title "${{ steps.apk.outputs.tag }}" \
+            --notes "APK de release do commit ${{ github.sha }}. Assinado com a chave de debug (ver android/app/build.gradle.kts)."
