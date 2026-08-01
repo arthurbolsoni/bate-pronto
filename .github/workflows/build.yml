@@ -51,11 +51,15 @@ jobs:
         id: apk
         run: |
           # pubspec.yaml has CRLF endings, so strip \r before it lands in a filename.
-          version=$(awk '/^version:/{print $2}' pubspec.yaml | tr -d '\r' | tr '+' '-')
-          name="bate-pronto-${version}-build.${{ github.run_number }}"
+          # Only the semver core is kept: "1.1.0+2" -> "1.1.0". The pubspec build
+          # number is the Android versionCode, not part of the release identity.
+          core=$(awk '/^version:/{print $2}' pubspec.yaml | tr -d '\r' | cut -d+ -f1)
+          # The run number rides along as semver build metadata, so every push to
+          # main gets a unique tag without faking a prerelease of ${core}.
+          name="bate-pronto-${core}+build.${{ github.run_number }}"
           mv build/app/outputs/flutter-apk/app-release.apk "build/app/outputs/flutter-apk/${name}.apk"
           echo "path=build/app/outputs/flutter-apk/${name}.apk" >> "$GITHUB_OUTPUT"
-          echo "tag=v${version}-build.${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+          echo "tag=v${core}+build.${{ github.run_number }}" >> "$GITHUB_OUTPUT"
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
