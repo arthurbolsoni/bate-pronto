@@ -10,7 +10,7 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  final _email = TextEditingController(text: 'arthur.bolsoni@wmcsistemas.com');
+  final _email = TextEditingController();
   final _pass = TextEditingController();
   bool _loading = false;
   bool _obscure = true;
