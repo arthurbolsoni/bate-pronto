@@ -32,6 +32,7 @@ class _HoursScreenState extends State<HoursScreen> {
     super.initState();
     _load();
     _api.proposalMotives().then((m) => setState(() => _motives = m));
+    MoneyPrivacy.load();
     SalaryConfig.load().then((s) {
       if (mounted) setState(() => _salary = s);
     });
@@ -148,7 +149,21 @@ class _HoursScreenState extends State<HoursScreen> {
   Widget build(BuildContext context) {
     final pending = _pending;
     return Scaffold(
-      appBar: AppBar(title: const Text('Ver Horas')),
+      appBar: AppBar(
+        title: const Text('Ver Horas'),
+        actions: [
+          ValueListenableBuilder<bool>(
+            valueListenable: MoneyPrivacy.hidden,
+            builder: (_, hidden, _) => IconButton(
+              icon: Icon(hidden
+                  ? Icons.visibility_off_outlined
+                  : Icons.visibility_outlined),
+              tooltip: hidden ? 'Mostrar valores' : 'Esconder valores',
+              onPressed: MoneyPrivacy.toggle,
+            ),
+          ),
+        ],
+      ),
       body: RefreshIndicator(
         onRefresh: _load,
         child: ListView(
@@ -352,7 +367,13 @@ class _HoursScreenState extends State<HoursScreen> {
   }
 
   // Card do salário: zerado até configurar valor/hora. Toque abre o SalarySheet.
-  Widget _salaryCard() {
+  // Com o olhinho ligado os valores em R$ viram máscara.
+  Widget _salaryCard() => ValueListenableBuilder<bool>(
+        valueListenable: MoneyPrivacy.hidden,
+        builder: (_, hide, _) => _salaryCardBody(hide),
+      );
+
+  Widget _salaryCardBody(bool hide) {
     final m = _monthTotals();
     final seconds = switch (_salary.base) {
       SalaryBase.projecao => m.projection,
@@ -395,7 +416,7 @@ class _HoursScreenState extends State<HoursScreen> {
                         const Text('Salário do mês',
                             style: TextStyle(fontSize: 13, color: C.mut)),
                         const SizedBox(height: 2),
-                        Text(brl(set ? r.liquido : 0),
+                        Text(brl(set ? r.liquido : 0, hide: set && hide),
                             style: TextStyle(
                                 fontSize: 24,
                                 fontWeight: FontWeight.bold,
@@ -403,7 +424,7 @@ class _HoursScreenState extends State<HoursScreen> {
                         const SizedBox(height: 2),
                         Text(
                           set
-                              ? '${brl(_salary.hourRate)}/h · ${hhmm(seconds)} · ${_salary.base.label.toLowerCase()}'
+                              ? '${brl(_salary.hourRate, hide: hide)}/h · ${hhmm(seconds)} · ${_salary.base.label.toLowerCase()}'
                               : 'Toque para informar valor/hora e descontos',
                           style: const TextStyle(fontSize: 12, color: C.mut),
                         ),
@@ -415,13 +436,13 @@ class _HoursScreenState extends State<HoursScreen> {
               ),
               if (set) ...[
                 const Divider(color: C.line, height: 22),
-                _salaryLine('Bruto', brl(r.bruto), C.fg),
+                _salaryLine('Bruto', brl(r.bruto, hide: hide), C.fg),
                 if (_salary.inssPct > 0)
                   _salaryLine('INSS (${_fmtPct(_salary.inssPct)}%)',
-                      '−${brl(r.inss)}', C.neg),
+                      '−${brl(r.inss, hide: hide)}', C.neg),
                 if (_salary.otherPct > 0)
                   _salaryLine('Outros (${_fmtPct(_salary.otherPct)}%)',
-                      '−${brl(r.outros)}', C.neg),
+                      '−${brl(r.outros, hide: hide)}', C.neg),
               ],
             ],
           ),
@@ -496,16 +517,19 @@ class _HoursScreenState extends State<HoursScreen> {
   }
 
   Widget _table() {
-    return Card(
-      child: Column(
-        children: [
-          for (final d in _days) _row(d),
-        ],
+    return ValueListenableBuilder<bool>(
+      valueListenable: MoneyPrivacy.hidden,
+      builder: (_, hide, _) => Card(
+        child: Column(
+          children: [
+            for (final d in _days) _row(d, hide),
+          ],
+        ),
       ),
     );
   }
 
-  Widget _row(WorkDay d) {
+  Widget _row(WorkDay d, bool hide) {
     final dt = DateTime.parse(d.date);
     final dow = diasSemana[dt.weekday % 7];
     final cardsText = d.cards.map((c) => c.time).join('  ');
@@ -572,7 +596,7 @@ class _HoursScreenState extends State<HoursScreen> {
                 Text('−${hhmm(d.missingTime.round())}',
                     style: const TextStyle(color: C.neg, fontSize: 12)),
               if (_salary.isSet && !d.isOff && d.workedSeconds > 0)
-                Text(brl(_salary.hourRate * d.workedSeconds / 3600),
+                Text(brl(_salary.hourRate * d.workedSeconds / 3600, hide: hide),
                     style: const TextStyle(color: C.acc, fontSize: 12)),
             ],
           ),
