@@ -50,7 +50,8 @@ jobs:
       - name: Name the APK
         id: apk
         run: |
-          version=$(awk '/^version:/{print $2}' pubspec.yaml | tr '+' '-')
+          # pubspec.yaml has CRLF endings, so strip \r before it lands in a filename.
+          version=$(awk '/^version:/{print $2}' pubspec.yaml | tr -d '\r' | tr '+' '-')
           name="bate-pronto-${version}-build.${{ github.run_number }}"
           mv build/app/outputs/flutter-apk/app-release.apk "build/app/outputs/flutter-apk/${name}.apk"
           echo "path=build/app/outputs/flutter-apk/${name}.apk" >> "$GITHUB_OUTPUT"
