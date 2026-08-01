@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -13,7 +14,27 @@ enum SalaryBase {
 
 final _brl = NumberFormat.currency(locale: 'pt_BR', symbol: r'R$');
 
-String brl(double v) => _brl.format(v);
+/// Formata em reais. Com [hide], devolve a máscara do olhinho no lugar do valor.
+String brl(double v, {bool hide = false}) => hide ? r'R$ ••••' : _brl.format(v);
+
+/// Olhinho estilo app de banco: esconde os valores em R$ da tela de horas.
+/// O estado é global (um notifier) e fica persistido em SharedPreferences.
+class MoneyPrivacy {
+  static const _kHidden = 'money_hidden';
+
+  static final ValueNotifier<bool> hidden = ValueNotifier(false);
+
+  static Future<void> load() async {
+    final p = await SharedPreferences.getInstance();
+    hidden.value = p.getBool(_kHidden) ?? false;
+  }
+
+  static Future<void> toggle() async {
+    hidden.value = !hidden.value;
+    final p = await SharedPreferences.getInstance();
+    await p.setBool(_kHidden, hidden.value);
+  }
+}
 
 /// Parâmetros do salário, persistidos em SharedPreferences. Começa zerado —
 /// enquanto [isSet] for false o card mostra R$ 0,00.
