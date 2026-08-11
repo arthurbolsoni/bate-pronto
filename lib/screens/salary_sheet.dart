@@ -78,6 +78,21 @@ class _SalarySheetState extends State<SalarySheet> {
     if (mounted) Navigator.pop(context, _cfg);
   }
 
+  Future<void> _pickBirthday() async {
+    final now = DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _cfg.birthday ?? DateTime(now.year - 25, 1, 1),
+      firstDate: DateTime(1940),
+      lastDate: now,
+      helpText: 'Data de nascimento',
+    );
+    if (picked != null) setState(() => _cfg.birthday = picked);
+  }
+
+  String _fmtDate(DateTime d) =>
+      '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}';
+
   @override
   Widget build(BuildContext context) {
     final draft = _draft;
@@ -146,6 +161,34 @@ class _SalarySheetState extends State<SalarySheet> {
                     ),
                 ],
                 onChanged: (v) => setState(() => _cfg.base = v!),
+              ),
+              const SizedBox(height: 12),
+              InkWell(
+                borderRadius: BorderRadius.circular(8),
+                onTap: _pickBirthday,
+                child: InputDecorator(
+                  decoration: InputDecoration(
+                    labelText: 'Data de nascimento',
+                    helperText:
+                        'Rende day-off pago no mês (sáb/dom → sexta anterior)',
+                    helperStyle: const TextStyle(color: C.mut, fontSize: 11),
+                    suffixIcon: _cfg.birthday == null
+                        ? const Icon(Icons.cake_outlined, color: C.mut)
+                        : IconButton(
+                            icon: const Icon(Icons.clear, color: C.mut),
+                            onPressed: () =>
+                                setState(() => _cfg.birthday = null),
+                          ),
+                  ),
+                  child: Text(
+                    _cfg.birthday == null
+                        ? 'Toque para informar'
+                        : _fmtDate(_cfg.birthday!),
+                    style: TextStyle(
+                        color: _cfg.birthday == null ? C.mut : C.fg,
+                        fontSize: 16),
+                  ),
+                ),
               ),
               const SizedBox(height: 18),
               // preview

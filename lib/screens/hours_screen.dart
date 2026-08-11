@@ -68,9 +68,27 @@ class _HoursScreenState extends State<HoursScreen> {
     }
   }
 
+  // Data (ISO) do day-off de aniversário no mês exibido, ou null.
+  DateTime? get _dayOff {
+    final t = _targetMonth;
+    return birthdayDayOffInMonth(_salary.birthday, t.year, t.month);
+  }
+
+  String? get _dayOffIso {
+    final d = _dayOff;
+    return d == null ? null : '${d.year}-${_two(d.month)}-${_two(d.day)}';
+  }
+
+  // Um day-off pago vale um turno normal; 0 se não cai neste mês.
+  int get _dayOffSeconds => _dayOff == null ? 0 : _normalDailyShift;
+
   List<WorkDay> get _pending {
     final today = DateTime.now();
-    return _days.where((d) => d.isPending(today)).toList();
+    final offIso = _dayOffIso;
+    // O day-off de aniversário é folga legítima — nunca vira pendência.
+    return _days
+        .where((d) => d.date != offIso && d.isPending(today))
+        .toList();
   }
 
   int get _workedSeconds => _days.fold(0, (a, d) => a + d.workedSeconds);
@@ -91,6 +109,7 @@ class _HoursScreenState extends State<HoursScreen> {
     final lastDay = DateTime(t.year, t.month + 1, 0).day;
     final byIso = {for (final d in _days) d.date: d};
     final normal = _normalDailyShift;
+    final offIso = _dayOffIso;
 
     int projection = 0, carga = 0;
     for (int day = 1; day <= lastDay; day++) {
@@ -98,6 +117,15 @@ class _HoursScreenState extends State<HoursScreen> {
       final iso = '${t.year}-${_two(t.month)}-${_two(day)}';
       final wd = byIso[iso];
       final isWeekday = date.weekday <= 5; // seg-sex
+
+      // Day-off de aniversário: dia normal pago sem trabalhar. Substitui a
+      // contribuição do dia por um turno normal (não soma por cima).
+      if (iso == offIso) {
+        carga += normal;
+        projection += normal;
+        continue;
+      }
+
       // carga esperada do dia (real se existe, senão dia útil = turno normal)
       final expected =
           wd != null ? wd.shiftTime.round() : (isWeekday ? normal : 0);
@@ -138,7 +166,7 @@ class _HoursScreenState extends State<HoursScreen> {
       builder: (_) => SalarySheet(
         config: _salary,
         projecaoSeconds: m.projection,
-        trabalhadoSeconds: _workedSeconds,
+        trabalhadoSeconds: _workedSeconds + _dayOffSeconds,
         cargaSeconds: m.carga,
       ),
     );
@@ -377,7 +405,7 @@ class _HoursScreenState extends State<HoursScreen> {
     final m = _monthTotals();
     final seconds = switch (_salary.base) {
       SalaryBase.projecao => m.projection,
-      SalaryBase.trabalhado => _workedSeconds,
+      SalaryBase.trabalhado => _workedSeconds + _dayOffSeconds,
       SalaryBase.carga => m.carga,
     };
     final r = _salary.compute(seconds);
@@ -436,6 +464,11 @@ class _HoursScreenState extends State<HoursScreen> {
               ),
               if (set) ...[
                 const Divider(color: C.line, height: 22),
+                if (_dayOff != null)
+                  _salaryLine(
+                      'Day-off aniversário (${_dayOff!.day}/${_two(_dayOff!.month)} · +${hhmm(_dayOffSeconds)})',
+                      'incluso',
+                      C.pos),
                 _salaryLine('Bruto', brl(r.bruto, hide: hide), C.fg),
                 if (r.inss > 0)
                   _salaryLine('INSS (tabela)',
