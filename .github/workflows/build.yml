@@ -38,6 +38,23 @@ jobs:
       - name: Get dependencies
         run: flutter pub get
 
+      # Chave de release fixa (secrets) pra todo APK ter a MESMA assinatura —
+      # sem isso o Android recusa o upgrade por conflito de assinatura.
+      - name: Restore release keystore
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          STORE_PW: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_PW: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          echo "$KEYSTORE_B64" | base64 -d > android/app/upload-keystore.jks
+          cat > android/key.properties <<EOF
+          storePassword=$STORE_PW
+          keyPassword=$KEY_PW
+          keyAlias=$KEY_ALIAS
+          storeFile=upload-keystore.jks
+          EOF
+
       - name: Analyze
         run: flutter analyze
 
@@ -76,4 +93,4 @@ jobs:
           gh release create "${{ steps.apk.outputs.tag }}" \
             "${{ steps.apk.outputs.path }}" \
             --title "${{ steps.apk.outputs.tag }}" \
-            --notes "APK de release do commit ${{ github.sha }}. Assinado com a chave de debug (ver android/app/build.gradle.kts)."
+            --notes "APK de release do commit ${{ github.sha }}. Assinado com a chave de release fixa (secrets do repo)."
