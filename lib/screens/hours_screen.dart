@@ -437,8 +437,8 @@ class _HoursScreenState extends State<HoursScreen> {
               if (set) ...[
                 const Divider(color: C.line, height: 22),
                 _salaryLine('Bruto', brl(r.bruto, hide: hide), C.fg),
-                if (_salary.inssPct > 0)
-                  _salaryLine('INSS (${_fmtPct(_salary.inssPct)}%)',
+                if (r.inss > 0)
+                  _salaryLine('INSS (tabela)',
                       '−${brl(r.inss, hide: hide)}', C.neg),
                 if (_salary.otherPct > 0)
                   _salaryLine('Outros (${_fmtPct(_salary.otherPct)}%)',
