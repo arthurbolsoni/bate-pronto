@@ -17,6 +17,34 @@ final _brl = NumberFormat.currency(locale: 'pt_BR', symbol: r'R$');
 /// Formata em reais. Com [hide], devolve a máscara do olhinho no lugar do valor.
 String brl(double v, {bool hide = false}) => hide ? r'R$ ••••' : _brl.format(v);
 
+/// Faixa da tabela de INSS (SM) vigente 01/2026. O desconto é fixo por faixa
+/// de remuneração total — INSS (SM) = 20% da remuneração produção da faixa.
+class InssBracket {
+  /// Teto da remuneração total da faixa (inclusive). Infinito na última.
+  final double limit;
+
+  /// Remuneração produção base usada pra apurar o INSS da faixa.
+  final double producao;
+
+  /// Desconto de INSS fixo da faixa (R$).
+  final double inss;
+
+  const InssBracket(this.limit, this.producao, this.inss);
+}
+
+/// Tabela vigente. A última faixa é o teto: qualquer bruto acima de 8.000
+/// desconta R$ 389,00 (comporta o gap 8.000→8.001 e brutos acima de 10k).
+const inssTable = <InssBracket>[
+  InssBracket(4706.67, 1621.00, 324.20),
+  InssBracket(6500.00, 1692.00, 338.40),
+  InssBracket(8000.00, 1787.00, 357.40),
+  InssBracket(double.infinity, 1945.00, 389.00),
+];
+
+/// Faixa da tabela pra um dado bruto (remuneração total do mês).
+InssBracket inssBracketFor(double bruto) =>
+    inssTable.firstWhere((b) => bruto <= b.limit, orElse: () => inssTable.last);
+
 /// Olhinho estilo app de banco: esconde os valores em R$ da tela de horas.
 /// O estado é global (um notifier) e fica persistido em SharedPreferences.
 class MoneyPrivacy {
@@ -40,18 +68,15 @@ class MoneyPrivacy {
 /// enquanto [isSet] for false o card mostra R$ 0,00.
 class SalaryConfig {
   static const _kRate = 'salary_hour_rate';
-  static const _kInss = 'salary_inss_pct';
   static const _kOther = 'salary_other_pct';
   static const _kBase = 'salary_base';
 
   double hourRate;
-  double inssPct;
   double otherPct;
   SalaryBase base;
 
   SalaryConfig({
     this.hourRate = 0,
-    this.inssPct = 0,
     this.otherPct = 0,
     this.base = SalaryBase.projecao,
   });
@@ -60,7 +85,6 @@ class SalaryConfig {
 
   SalaryConfig copy() => SalaryConfig(
         hourRate: hourRate,
-        inssPct: inssPct,
         otherPct: otherPct,
         base: base,
       );
@@ -70,7 +94,6 @@ class SalaryConfig {
     final baseName = p.getString(_kBase);
     return SalaryConfig(
       hourRate: p.getDouble(_kRate) ?? 0,
-      inssPct: p.getDouble(_kInss) ?? 0,
       otherPct: p.getDouble(_kOther) ?? 0,
       base: SalaryBase.values.firstWhere(
         (b) => b.name == baseName,
@@ -82,43 +105,48 @@ class SalaryConfig {
   Future<void> save() async {
     final p = await SharedPreferences.getInstance();
     await p.setDouble(_kRate, hourRate);
-    await p.setDouble(_kInss, inssPct);
     await p.setDouble(_kOther, otherPct);
     await p.setString(_kBase, base.name);
   }
 
   Future<void> clear() async {
-    hourRate = inssPct = otherPct = 0;
+    hourRate = otherPct = 0;
     base = SalaryBase.projecao;
     final p = await SharedPreferences.getInstance();
     await p.remove(_kRate);
-    await p.remove(_kInss);
     await p.remove(_kOther);
     await p.remove(_kBase);
   }
 
   /// Cálculo do mês a partir dos segundos da base escolhida.
+  /// O INSS sai da tabela de faixas ([inssTable]) pelo bruto do mês.
   SalaryResult compute(int seconds) {
     final hours = seconds / 3600.0;
     final bruto = hourRate * hours;
-    final inss = bruto * inssPct / 100;
+    final bracket = inssBracketFor(bruto);
     final outros = bruto * otherPct / 100;
     return SalaryResult(
       hours: hours,
       bruto: bruto,
-      inss: inss,
+      inss: bracket.inss,
+      bracket: bracket,
       outros: outros,
-      liquido: bruto - inss - outros,
+      liquido: bruto - bracket.inss - outros,
     );
   }
 }
 
 class SalaryResult {
   final double hours, bruto, inss, outros, liquido;
+
+  /// Faixa da tabela de INSS aplicada ao bruto.
+  final InssBracket bracket;
+
   const SalaryResult({
     required this.hours,
     required this.bruto,
     required this.inss,
+    required this.bracket,
     required this.outros,
     required this.liquido,
   });
