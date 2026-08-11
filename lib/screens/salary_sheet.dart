@@ -22,7 +22,7 @@ class SalarySheet extends StatefulWidget {
 
 class _SalarySheetState extends State<SalarySheet> {
   late SalaryConfig _cfg;
-  late TextEditingController _rate, _inss, _other;
+  late TextEditingController _rate, _other;
   String? _error;
 
   @override
@@ -32,14 +32,12 @@ class _SalarySheetState extends State<SalarySheet> {
     String fmt(double v) =>
         v == 0 ? '' : v.toStringAsFixed(2).replaceAll('.', ',');
     _rate = TextEditingController(text: fmt(_cfg.hourRate));
-    _inss = TextEditingController(text: fmt(_cfg.inssPct));
     _other = TextEditingController(text: fmt(_cfg.otherPct));
   }
 
   @override
   void dispose() {
     _rate.dispose();
-    _inss.dispose();
     _other.dispose();
     super.dispose();
   }
@@ -53,26 +51,23 @@ class _SalarySheetState extends State<SalarySheet> {
   /// Preview ao vivo com o que está digitado agora.
   SalaryConfig get _draft => SalaryConfig(
         hourRate: parseNum(_rate.text) ?? 0,
-        inssPct: parseNum(_inss.text) ?? 0,
         otherPct: parseNum(_other.text) ?? 0,
         base: _cfg.base,
       );
 
   Future<void> _save() async {
     final rate = parseNum(_rate.text) ?? 0;
-    final inss = parseNum(_inss.text) ?? 0;
     final other = parseNum(_other.text) ?? 0;
     if (rate <= 0) {
       setState(() => _error = 'Informe o valor da hora.');
       return;
     }
-    if (inss < 0 || inss > 100 || other < 0 || other > 100) {
-      setState(() => _error = 'Percentuais devem ficar entre 0 e 100.');
+    if (other < 0 || other > 100) {
+      setState(() => _error = 'Percentual deve ficar entre 0 e 100.');
       return;
     }
     _cfg
       ..hourRate = rate
-      ..inssPct = inss
       ..otherPct = other;
     await _cfg.save();
     if (mounted) Navigator.pop(context, _cfg);
@@ -127,36 +122,16 @@ class _SalarySheetState extends State<SalarySheet> {
                 ),
               ),
               const SizedBox(height: 12),
-              Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      controller: _inss,
-                      keyboardType: const TextInputType.numberWithOptions(
-                          decimal: true, signed: false),
-                      onChanged: (_) => setState(() {}),
-                      decoration: const InputDecoration(
-                        labelText: 'INSS',
-                        suffixText: '%',
-                        hintText: '0',
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: TextField(
-                      controller: _other,
-                      keyboardType: const TextInputType.numberWithOptions(
-                          decimal: true, signed: false),
-                      onChanged: (_) => setState(() {}),
-                      decoration: const InputDecoration(
-                        labelText: 'Outros descontos',
-                        suffixText: '%',
-                        hintText: '0',
-                      ),
-                    ),
-                  ),
-                ],
+              TextField(
+                controller: _other,
+                keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true, signed: false),
+                onChanged: (_) => setState(() {}),
+                decoration: const InputDecoration(
+                  labelText: 'Outros descontos',
+                  suffixText: '%',
+                  hintText: '0',
+                ),
               ),
               const SizedBox(height: 12),
               DropdownButtonFormField<SalaryBase>(
@@ -186,8 +161,7 @@ class _SalarySheetState extends State<SalarySheet> {
                     _line('Horas (${draft.base.label.toLowerCase()})',
                         hhmm(_secondsFor(draft.base)), C.fg),
                     _line('Bruto', brl(r.bruto), C.fg),
-                    _line('INSS (${_pct(draft.inssPct)}%)', '−${brl(r.inss)}',
-                        C.neg),
+                    _line('INSS (tabela)', '−${brl(r.inss)}', C.neg),
                     _line('Outros (${_pct(draft.otherPct)}%)',
                         '−${brl(r.outros)}', C.neg),
                     const Divider(color: C.line, height: 18),
