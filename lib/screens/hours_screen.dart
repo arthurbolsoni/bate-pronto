@@ -550,12 +550,14 @@ class _HoursScreenState extends State<HoursScreen> {
   }
 
   Widget _table() {
+    // Mais recente primeiro; a data é ISO, então ordem textual = cronológica.
+    final rows = [..._days]..sort((a, b) => b.date.compareTo(a.date));
     return ValueListenableBuilder<bool>(
       valueListenable: MoneyPrivacy.hidden,
       builder: (_, hide, _) => Card(
         child: Column(
           children: [
-            for (final d in _days) _row(d, hide),
+            for (final d in rows) _row(d, hide),
           ],
         ),
       ),
