@@ -12,6 +12,21 @@ class ApiException implements Exception {
   String toString() => message;
 }
 
+/// A request estourou o tempo. Para o register isso não significa que a batida
+/// falhou — ela pode ter entrado na fila do servidor mesmo assim.
+class ApiTimeoutException extends ApiException {
+  ApiTimeoutException()
+      : super(408, 'O servidor do Pontomais não respondeu a tempo.');
+}
+
+/// Resposta do register. O endpoint é assíncrono: devolve `message_id` e
+/// `untreated_time_card` (a batida como entrou na fila) antes de processá-la.
+class PunchResult {
+  final String? time; // "HH:mm" aceito pelo servidor, se veio na resposta
+  final bool queued; // aceito para processar depois (ainda não no espelho)
+  PunchResult(this.time, this.queued);
+}
+
 /// Cliente da API do Pontomais. Guarda os tokens (devise-token-auth) em
 /// SharedPreferences e injeta os headers em toda request.
 class PontomaisApi {
@@ -89,6 +104,15 @@ class PontomaisApi {
         'User-Agent': _ua,
       };
 
+  // Sem timeout explícito o socket pode ficar pendurado por minutos e a tela
+  // fica girando sem resposta. Escrita ganha folga maior que leitura.
+  static const _readTimeout = Duration(seconds: 15);
+  static const _writeTimeout = Duration(seconds: 30);
+
+  static Future<http.Response> _withTimeout(
+          Future<http.Response> req, Duration limit) =>
+      req.timeout(limit, onTimeout: () => throw ApiTimeoutException());
+
   // devise-token-auth pode rotacionar o token a cada request; captura o novo.
   void _absorbTokens(http.Response r) {
     final t = r.headers['access-token'];
@@ -118,7 +142,8 @@ class PontomaisApi {
   }
 
   Future<dynamic> _get(String path, {bool retry = true}) async {
-    final r = await http.get(Uri.parse('$_base$path'), headers: _headers);
+    final r = await _withTimeout(
+        http.get(Uri.parse('$_base$path'), headers: _headers), _readTimeout);
     _absorbTokens(r);
     if (_sessionExpired(r)) {
       if (retry && await _reauth()) return _get(path, retry: false);
@@ -140,12 +165,16 @@ class PontomaisApi {
   }
 
   Future<dynamic> _post(String path, Map<String, dynamic> body,
-      {bool retry = true}) async {
-    final r = await http.post(Uri.parse('$_base$path'),
-        headers: _headers, body: jsonEncode(body));
+      {bool retry = true, Duration? timeout}) async {
+    final r = await _withTimeout(
+        http.post(Uri.parse('$_base$path'),
+            headers: _headers, body: jsonEncode(body)),
+        timeout ?? _writeTimeout);
     _absorbTokens(r);
     if (_sessionExpired(r)) {
-      if (retry && await _reauth()) return _post(path, body, retry: false);
+      if (retry && await _reauth()) {
+        return _post(path, body, retry: false, timeout: timeout);
+      }
       throw ApiException(r.statusCode, 'Sessão expirou. Faça login.');
     }
     if (r.statusCode >= 400) {
@@ -172,7 +201,8 @@ class PontomaisApi {
 
   // ---------- login ----------
   Future<void> signIn(String email, String password) async {
-    final r = await http.post(
+    final r = await _withTimeout(
+        http.post(
       Uri.parse('$_base/api/auth/sign_in'),
       headers: {
         'Content-Type': 'application/json',
@@ -183,7 +213,8 @@ class PontomaisApi {
         'User-Agent': _ua,
       },
       body: jsonEncode({'email': email, 'password': password}),
-    );
+        ),
+        _writeTimeout);
     if (r.statusCode >= 400) {
       String msg = 'Falha no login';
       try {
@@ -256,10 +287,14 @@ class PontomaisApi {
   }
 
   // ---------- bater ponto ----------
-  /// Registra a batida. Devolve a batida quando o servidor já a confirma no
-  /// corpo; devolve null quando aceitou pra processar depois (202/corpo vazio)
-  /// — nesse caso a tela precisa confirmar consultando o servidor.
-  Future<TimeCard?> registerPunch() async {
+  /// Registra a batida.
+  ///
+  /// O endpoint é assíncrono: o servidor enfileira a batida e responde com
+  /// `message_id` + `untreated_time_card` (data/hora que entrou na fila) antes
+  /// de gravá-la no espelho. É assim que o app2 dá o ponto por registrado —
+  /// ele guarda essa batida local e a exibe até o espelho alcançar. Esperar a
+  /// batida aparecer em work_days é o que fazia a tela girar até estourar.
+  Future<PunchResult> registerPunch() async {
     final body = {
       'image': null,
       'employee': {'id': employeeId, 'pin': null},
@@ -287,10 +322,24 @@ class PontomaisApi {
       },
     };
     final j = await _post('/api/time_cards/register', body);
-    final tc = j['time_card'] ?? j['employee']?['time_cards']?.last ?? {};
-    final time = (tc['time'] ?? '').toString();
-    if (time.length < 5) return null; // aceito, mas ainda não confirmado
-    return TimeCard(tc['id'] ?? 0, time.substring(0, 5));
+    final gravada = j['time_card'] ?? j['employee']?['time_cards']?.last;
+    final naFila = j['untreated_time_card'];
+    final time = _punchTime(gravada?['time']) ?? _punchTime(naFila?['time']);
+    return PunchResult(time, gravada == null);
+  }
+
+  // "HH:mm[:ss]" vem pronto; ISO completo vem em UTC (o app2 converte pelo
+  // time_offset do funcionário — aqui o fuso do aparelho dá no mesmo).
+  static String? _punchTime(dynamic raw) {
+    final s = (raw ?? '').toString();
+    if (s.length < 5) return null;
+    if (s.contains('T')) {
+      final d = DateTime.tryParse(s)?.toLocal();
+      if (d == null) return null;
+      return '${d.hour.toString().padLeft(2, '0')}:'
+          '${d.minute.toString().padLeft(2, '0')}';
+    }
+    return s.substring(0, 5);
   }
 
   /// Batidas de hoje direto do servidor (fonte da verdade pra confirmar).

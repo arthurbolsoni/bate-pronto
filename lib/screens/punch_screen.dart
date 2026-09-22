@@ -18,8 +18,10 @@ class _PunchScreenState extends State<PunchScreen>
     with WidgetsBindingObserver {
   static const _cooldownSeconds = 60; // trava o botão após bater (anti duplo clique)
   static const _kCooldownUntil = 'punch_cooldown_until'; // millis epoch
+  static const _kQueued = 'punch_queued'; // "YYYY-MM-DD HH:mm" ainda na fila
   final _api = PontomaisApi.instance;
   List<TimeCard> _today = [];
+  List<String> _queued = []; // batidas aceitas que o espelho ainda não mostra
   String? _lastText;
   bool _loading = true;
   bool _punching = false;
@@ -34,6 +36,7 @@ class _PunchScreenState extends State<PunchScreen>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _restoreCooldown();
+    _loadQueued();
     _refresh();
   }
 
@@ -98,11 +101,19 @@ class _PunchScreenState extends State<PunchScreen>
     });
     try {
       final todayStr = DateFormat('yyyy-MM-dd').format(DateTime.now());
-      final days = await _api.workDays(todayStr, todayStr);
-      final last = await _api.lastCached();
+      // Em paralelo: uma request lenta não soma no tempo da outra.
+      final r = await Future.wait([
+        _api.workDays(todayStr, todayStr),
+        // o último registro é enfeite — não pode derrubar a tela inteira
+        _api.lastCached().catchError((_) => <TimeCard>[]),
+      ]);
+      final days = r[0] as List<WorkDay>;
+      final last = r[1] as List<TimeCard>;
+      final cards = days.isNotEmpty ? days.first.cards : <TimeCard>[];
+      await _pruneQueued(cards);
       setState(() {
-        _today = days.isNotEmpty ? days.first.cards : [];
-        _lastText = last.isNotEmpty ? last.first.time : null;
+        _today = cards;
+        if (last.isNotEmpty) _lastText = last.first.time;
       });
     } catch (e) {
       setState(() => _error = e.toString());
@@ -111,12 +122,70 @@ class _PunchScreenState extends State<PunchScreen>
     }
   }
 
+  String get _todayIso => DateFormat('yyyy-MM-dd').format(DateTime.now());
+
+  // ---- batidas na fila ----------------------------------------------------
+  // O register é assíncrono: o servidor aceita a batida e só depois a grava no
+  // espelho. Até lá ela fica guardada aqui e aparece na lista, como o app2 faz.
+
+  Future<void> _loadQueued() async {
+    final p = await SharedPreferences.getInstance();
+    final hoje = _todayIso;
+    final keep = (p.getStringList(_kQueued) ?? [])
+        .where((e) => e.startsWith('$hoje '))
+        .toList();
+    await p.setStringList(_kQueued, keep);
+    if (mounted) {
+      setState(() => _queued = keep.map((e) => e.substring(11)).toList());
+    }
+  }
+
+  Future<void> _addQueued(String time) async {
+    final p = await SharedPreferences.getInstance();
+    final all = (p.getStringList(_kQueued) ?? [])..add('$_todayIso $time');
+    await p.setStringList(_kQueued, all);
+    await _loadQueued();
+  }
+
+  static int _min(String hhmm) =>
+      int.parse(hhmm.substring(0, 2)) * 60 + int.parse(hhmm.substring(3, 5));
+
+  // O espelho alcançou? Então a cópia local não é mais necessária. Tolera 1min
+  // de diferença: o horário que o servidor grava nem sempre é o da fila.
+  Future<void> _pruneQueued(List<TimeCard> server) async {
+    if (_queued.isEmpty) return;
+    final gravadas = server.map((c) => _min(c.time)).toList();
+    bool naFila(String e) {
+      if (!e.startsWith('$_todayIso ')) return true; // outro dia: _loadQueued limpa
+      final m = _min(e.substring(11));
+      return !gravadas.any((g) => (g - m).abs() <= 1);
+    }
+
+    final p = await SharedPreferences.getInstance();
+    final keep = (p.getStringList(_kQueued) ?? []).where(naFila).toList();
+    await p.setStringList(_kQueued, keep);
+    if (mounted) {
+      setState(() => _queued = keep
+          .where((e) => e.startsWith('$_todayIso '))
+          .map((e) => e.substring(11))
+          .toList());
+    }
+  }
+
+  // Batidas de hoje como o usuário deve vê-las: o que o servidor já gravou
+  // mais o que ele aceitou e ainda não processou.
+  List<({String time, bool queued})> get _cards {
+    final out = [
+      for (final c in _today) (time: c.time, queued: false),
+      for (final t in _queued) (time: t, queued: true),
+    ]..sort((a, b) => a.time.compareTo(b.time));
+    return out;
+  }
+
   // próxima batida é entrada ou saída? (par = entrada)
-  String get _nextKind => _today.length.isEven ? 'ENTRADA' : 'SAÍDA';
+  String get _nextKind => _cards.length.isEven ? 'ENTRADA' : 'SAÍDA';
 
   // Um clique bate direto (sem confirmação). Trava o botão por 1 min depois.
-  // Só declara sucesso depois que o servidor confirma a batida — o register é
-  // assíncrono, então antes o app mostrava "registrado" mesmo quando não entrou.
   Future<void> _punch() async {
     if (_punching || _cooldown > 0) return;
     final before = _today.length;
@@ -126,28 +195,27 @@ class _PunchScreenState extends State<PunchScreen>
       _warn = null;
     });
     try {
-      final tc = await _api.registerPunch();
+      final r = await _api.registerPunch();
       if (!mounted) return;
       await _startCooldown(); // servidor aceitou → trava o botão
-      final confirmed = tc?.time ?? await _confirmPunch(before);
-      if (!mounted) return;
-      if (confirmed != null) {
-        setState(() => _lastText = confirmed);
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          backgroundColor: C.pos,
-          content: Text('Ponto registrado às $confirmed',
-              style: const TextStyle(color: Colors.black)),
-        ));
+      final time = r.time;
+      if (time != null) {
+        await _addQueued(time);
+        if (!mounted) return;
+        setState(() => _lastText = time);
+        _toast('Ponto registrado às $time', C.pos);
       } else {
-        setState(() => _warn =
-            'Batida enviada, mas o servidor não confirmou. Puxe para atualizar e confira antes de bater de novo.');
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          backgroundColor: C.warn,
-          content: Text('Não confirmado pelo servidor — verifique',
-              style: TextStyle(color: Colors.black)),
-        ));
+        // aceito sem devolver horário: aí sim vale perguntar ao servidor
+        await _confirmOrWarn(before);
       }
       await _refresh();
+    } on ApiTimeoutException {
+      // A batida pode ter entrado mesmo assim — nunca mandar bater de novo
+      // às cegas. Trava o botão e confere no servidor.
+      if (!mounted) return;
+      await _startCooldown();
+      await _confirmOrWarn(before);
+      if (mounted) await _refresh();
     } catch (e) {
       setState(() => _error = e.toString());
     } finally {
@@ -155,9 +223,29 @@ class _PunchScreenState extends State<PunchScreen>
     }
   }
 
-  // Confirma a batida consultando o servidor (até ~10s).
+  Future<void> _confirmOrWarn(int before) async {
+    final confirmed = await _confirmPunch(before);
+    if (!mounted) return;
+    if (confirmed != null) {
+      setState(() => _lastText = confirmed);
+      _toast('Ponto registrado às $confirmed', C.pos);
+    } else {
+      setState(() => _warn =
+          'A resposta do servidor não veio. A batida pode ter entrado — puxe '
+          'para atualizar e confira antes de bater de novo.');
+      _toast('Sem confirmação do servidor — verifique', C.warn);
+    }
+  }
+
+  void _toast(String msg, Color bg) =>
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        backgroundColor: bg,
+        content: Text(msg, style: const TextStyle(color: Colors.black)),
+      ));
+
+  // Consulta o servidor procurando a batida nova (até ~6s).
   Future<String?> _confirmPunch(int before) async {
-    for (var i = 0; i < 5; i++) {
+    for (var i = 0; i < 3; i++) {
       await Future.delayed(const Duration(seconds: 2));
       if (!mounted) return null;
       try {
@@ -309,7 +397,7 @@ class _PunchScreenState extends State<PunchScreen>
                     const Text('Batidas de hoje',
                         style: TextStyle(color: C.mut)),
                     const SizedBox(height: 8),
-                    if (_today.isEmpty)
+                    if (_cards.isEmpty)
                       const Text('Nenhuma batida hoje ainda',
                           style: TextStyle(color: C.mut))
                     else
@@ -317,13 +405,20 @@ class _PunchScreenState extends State<PunchScreen>
                         spacing: 8,
                         runSpacing: 8,
                         children: [
-                          for (var i = 0; i < _today.length; i++)
+                          for (var i = 0; i < _cards.length; i++)
                             Pill(
-                              '${i.isEven ? "▸" : "◂"} ${_today[i].time}',
+                              '${i.isEven ? "▸" : "◂"} ${_cards[i].time}'
+                              '${_cards[i].queued ? " ⏳" : ""}',
                               bg: C.bg,
-                              fg: C.fg,
+                              fg: _cards[i].queued ? C.mut : C.fg,
                             ),
                         ],
+                      ),
+                    if (_queued.isNotEmpty)
+                      const Padding(
+                        padding: EdgeInsets.only(top: 8),
+                        child: Text('⏳ enviada, aguardando o espelho do Pontomais',
+                            style: TextStyle(color: C.mut, fontSize: 12)),
                       ),
                   ],
                 ),
