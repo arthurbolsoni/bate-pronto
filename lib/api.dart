@@ -42,10 +42,6 @@ class PontomaisApi {
 
   bool get loggedIn => (accessToken?.isNotEmpty ?? false);
 
-  // token capturado antigo — se ainda estiver salvo de versões anteriores,
-  // limpa pra forçar login de verdade (com senha) desta vez.
-  static const _oldSeedToken = '***REMOVIDO***';
-
   // uuid do dispositivo — OBRIGATÓRIO no header pra registrar ponto (sem ele
   // a API responde 403). O sign_in não devolve, então usamos um fixo/persistente.
   static const _defaultUuid = '39c8480b-e287-49b3-90c3-e918c25b63a6';
@@ -59,9 +55,6 @@ class PontomaisApi {
     employeeId = p.getInt('employeeId');
     employeeName = p.getString('employeeName');
 
-    if (accessToken == _oldSeedToken) {
-      await logout(); // migração: descarta o token semeado antigo
-    }
     if ((uuid ?? '').isEmpty) uuid = _defaultUuid;
   }
 

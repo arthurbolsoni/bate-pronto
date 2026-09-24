@@ -1,19 +1,21 @@
 // Verificação standalone contra a API real (sem Flutter binding).
-// Rodar: dart run tool/live_check.dart
+// Rodar: PONTOMAIS_ACCESS_TOKEN=... PONTOMAIS_CLIENT=... PONTOMAIS_UID=... PONTOMAIS_UUID=... dart run tool/live_check.dart
 // ignore_for_file: avoid_print
 import 'dart:convert';
+import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'package:controle_horas/models.dart';
 
 void main() async {
+  String env(String k) => Platform.environment[k] ?? (throw StateError('defina $k'));
   final headers = {
     'api-version': '2',
     'Content-Type': 'application/json',
-    'access-token': '***REMOVIDO***',
-    'client': '***REMOVIDO***',
-    'uid': '***REMOVIDO***',
-    'uuid': '39c8480b-e287-49b3-90c3-e918c25b63a6',
-    'token': '***REMOVIDO***',
+    'access-token': env('PONTOMAIS_ACCESS_TOKEN'),
+    'client': env('PONTOMAIS_CLIENT'),
+    'uid': env('PONTOMAIS_UID'),
+    'uuid': env('PONTOMAIS_UUID'),
+    'token': env('PONTOMAIS_ACCESS_TOKEN'),
     'User-Agent': 'ControleHoras/1.0 (Dart)',
   };
   final url = Uri.parse('https://api.pontomais.com.br/api/time_card_control/'
